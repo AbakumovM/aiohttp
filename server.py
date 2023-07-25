@@ -1,13 +1,13 @@
-import asyncio
 import json
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm.session import sessionmaker
+
 import config
 from aiohttp import web
 from auth import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from models import User, Ads, Base, ORM_MODEL_CLS
-from sqlalchemy.exc import IntegrityError
-
-from sqlalchemy.orm.session import sessionmaker
+from models import ORM_MODEL_CLS, Ads, Base, User
 
 app = web.Application()
 engine = create_async_engine(config.PG_DSN)
@@ -23,18 +23,6 @@ async def get_items(session: Session, model_cls: ORM_MODEL_CLS, item_id: int | s
         )
     return item
 
-async def create_items(session: Session, model_cls: ORM_MODEL_CLS, **params):
-    new_item = model_cls(**params)
-    
-    try:
-        session.add(new_item)
-        await session.commit()
-    except IntegrityError as er:
-        raise web.HTTPConflict(
-                text=json.dumps({"error": "user already exists"}),
-                content_type="application/json",
-            )
-    return new_item
 
 @web.middleware
 async def session_middleware(request: web.Request, handler):
@@ -51,29 +39,24 @@ class AdsViews(web.View):
 
     @property
     def ads_id(self):
-        return int(self.request.match_info["user_id"])
+        return int(self.request.match_info["ads_id"])
 
-
-    def get(self):
-        ads = get_items(self.session, Ads, self.ads_id)
-        return web.json_response(
-            {"id": ads.id, 
-             "title": ads.title, 
-             "autor": ads.autor
-        })
+    async def get(self):
+        ads = await get_items(self.session, Ads, self.ads_id)
+        return web.json_response({"id": ads.id, "title": ads.title, "autor": ads.autor})
 
     async def post(self):
-        new_ads = await self.request.json() 
+        new_ads = await self.request.json()
         ads = Ads(**new_ads)
         self.session.add(ads)
         await self.session.commit()
         return web.json_response({"id": ads.id})
-        
+
     async def patch(self):
         js_data = await self.request.json()
-        ads = get_items(self.session, Ads, self.ads_id)
+        ads = await get_items(self.session, Ads, self.ads_id)
         for fields, value in js_data.items():
-            setattr(js_data, fields, value)
+            setattr(ads, fields, value)
         try:
             self.session.add(ads)
             await self.session.commit()
@@ -82,18 +65,16 @@ class AdsViews(web.View):
                 text=json.dumps({"error": "ads already exists"}),
                 content_type="application/json",
             )
-        return web.json_response({"id": ads.id})
+        return web.json_response({"answer": "data changed"})
 
     async def delete(self):
-        ads = await get_items(self.session, Ads,  self.ads_id)
+        ads = await get_items(self.session, Ads, self.ads_id)
         await self.session.delete(ads)
         await self.session.commit()
         return web.json_response({"id": ads.id})
 
 
 class UserViews(web.View):
-
-
     @property
     def session(self):
         return self.request["session"]
@@ -101,7 +82,6 @@ class UserViews(web.View):
     @property
     def user_id(self):
         return int(self.request.match_info["user_id"])
-
 
     async def get(self):
         user = await get_items(self.session, User, self.user_id)
@@ -121,19 +101,19 @@ class UserViews(web.View):
         await self.session.commit()
         return web.json_response({"id": user.id})
 
-
     async def delete(self):
-        user = await get_items(self.session, User,  self.user_id)
+        user = await get_items(self.session, User, self.user_id)
         await self.session.delete(user)
         await self.session.commit()
         return web.json_response({"id": user.id})
-    
+
 
 async def orm_context(app: web.Application):
     async with engine.begin() as con:
         await con.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()
+
 
 app.cleanup_ctx.append(orm_context)
 app.middlewares.append(session_middleware)
@@ -144,9 +124,9 @@ app.add_routes(
         web.patch("/users/{user_id:\d+}", UserViews),
         web.delete("/users/{user_id:\d+}", UserViews),
         web.post("/ads/", AdsViews),
-        web.get("/ads/{user_id:\d+}", AdsViews),
-        web.patch("/ads/{user_id:\d+}", AdsViews),
-        web.delete("/ads/{user_id:\d+}", AdsViews),
+        web.get("/ads/{ads_id:\d+}", AdsViews),
+        web.patch("/ads/{ads_id:\d+}", AdsViews),
+        web.delete("/ads/{ads_id:\d+}", AdsViews),
     ]
 )
 

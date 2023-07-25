@@ -1,12 +1,8 @@
 from typing import Type
 
-from cachetools import cached
-from sqlalchemy import (Column, DateTime, ForeignKey, Integer, String,
-             func)
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy_utils import EmailType
-
-
 
 Base = declarative_base()
 
